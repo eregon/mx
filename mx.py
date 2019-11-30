@@ -5708,7 +5708,7 @@ class LayoutDistribution(AbstractDistribution):
             def _rel_arcname(_source_file):
                 return os.path.relpath(_source_file, files_root)
             _arcname_f = _rel_arcname
-            if not self.suite.vc.locate(self.suite.vc_dir, file_path, abortOnError=False):
+            if not file_path.startswith(self.suite.vc_dir):
                 absolute_source = isabs(source_path)
                 if absolute_source:
                     _arcname_f = lambda a: a
@@ -8318,8 +8318,11 @@ class VC(_with_metaclass(ABCMeta, object)):
             if best_root is None or len(root) > len(best_root):  # prefer more nested vcs roots
                 best_root = root
                 best_vc = vcs
-        if abortOnError and best_root is None:
-            abort('cannot determine VC and root for ' + directory)
+        if best_root is None:
+            if abortOnError:
+                abort('cannot determine VC and root for ' + directory)
+            else:
+                best_root = dirname(directory)
         return best_vc, best_root
 
     def check(self, abortOnError=True):
