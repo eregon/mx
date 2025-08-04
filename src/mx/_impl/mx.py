@@ -158,6 +158,7 @@ __all__ = [
     "LinesOutputCapture",
     "TeeOutputCapture",
     "PrefixCapture",
+    "BytePrefixCapture",
     "HgConfig",
     "GitConfig",
     "BinaryVC",
@@ -9514,6 +9515,24 @@ class PrefixCapture:
             return repr(self.underlying)
         return object.__repr__(self)
 
+class BytePrefixCapture(PrefixCapture):
+    def __init__(self, underlying, identifier):
+        super(BytePrefixCapture, self).__init__(underlying, identifier)
+        self.is_first_call = True
+
+    def __call__(self, pid, data):
+        # Print the prefix on the first call
+        if self.is_first_call:
+            self.underlying(f'[{self.identifier}:{pid}] ')
+            self.is_first_call = False
+
+        if "\n" in data:
+            # Print the prefix after \n for later calls, as we might get only part of a line
+            assert data[-1] == "\n"
+            self.underlying(f'{data.rstrip()}\n[{self.identifier}:{pid}] ')
+        else:
+            self.underlying(data)
+
 class HgConfig(VC):
     has_hg = None
     """
@@ -13569,6 +13588,7 @@ def run(
     nonZeroIsFatal=True,
     out: RedirectStream = None,
     err: RedirectStream = None,
+    line_buffered=True,
     cwd=None,
     timeout=None,
     env=None,
@@ -13668,12 +13688,24 @@ def run(
 
         def redirect(pid, stream, f, logTask):
             setLogTask(logTask)  # inherit log task from parent thread
-            if isinstance(f, PrefixCapture):
+            if line_buffered:
                 for line in iter(stream.readline, b''):
-                    f(pid, decode_line(line))
+                    line = decode_line(line)
+                    if isinstance(f, PrefixCapture):
+                        f(pid, line)
+                    else:
+                        f(line)
             else:
-                for line in iter(stream.readline, b''):
-                    f(decode_line(line))
+                while data := stream.read1():
+                    # redirect functions expect at most one line at a time
+                    lines = decode_line(data).splitlines(keepends=True)
+                    for line in lines:
+                        # print(len(line))
+                        if isinstance(f, PrefixCapture):
+                            f(pid, line)
+                        else:
+                            f(line)
+
             stream.close()
 
         t = getLogTask()
